@@ -1,5 +1,0 @@
-<launch>
-	<node pkg="stage_ros" type="stageros" name="stageros" args="$(find ai_labs)/world/house1.world" respawn="false" output="screen" />
-	<node name="lab2" pkg="ai_labs" type="semesterProj.py" output="screen" />
-    <node name="rostopic" pkg="rostopic" type="rostopic" args="pub -1 next_waypoint geometry_msgs/Point -- '6.0' '6.0' '0.0'"/>
-</launch>
