@@ -9,39 +9,133 @@ from PIL import Image
 
 
 
+class MapArray:
+    def __init__(self, width, height):
+        self.width = width
+        self.height = height
+        self.obstaclesArray = self.__createBlankMapArray(width, height)
+        self.clearArray = self.__createBlankMapArray(width, height)
+        self.latestCompleteMap = []
+
+    def __createBlankMapArray(self, width, height):
+        mapArray = []
+        for i in range(width):
+            tempList = []
+            for j in range(height):
+                tempList.append(0)
+            mapArray.append(tempList)
+        return mapArray
+
+    def markObjects(self, spot):
+        global robot
+
+        # Marks black spot in obstacle array
+        try:
+            self.obstaclesArray[spot[0]][spot[1]] = "Black"
+        except:
+            print("Black spot out of bounds: " + str(spot))
 
 
+        pointsBetween = []
+        mapScaler = 9.5
 
-def createBlankMapArray(width, height):
-    mapArray = []
-    for i in range(width):
-        tempList = []
-        for j in range(height):
-            tempList.append(0)
-        mapArray.append(tempList)
-    return mapArray
+        # Converts robot coordinates to pixel coordinates
+        robotCoord = [robot[0], robot[1]]
+        robotCoord[0] += 7.5
+        robotCoord[1] -= 7.5
+        robotCoord[1] = abs(robotCoord[1])
 
+        robotCoord[0] = int(round(robotCoord[0]*mapScaler))
+        robotCoord[1] = int(round(robotCoord[1]*mapScaler))
 
-def pixelsToImage(pixelArray, imageName):
-    width = len(pixelArray)
-    height = len(pixelArray[0])
+        if robotCoord[0] > self.width: robotCoord[0] = self.width - 1
+        if robotCoord[1] > self.height: robotCoord[1] = self.height - 1
 
-    newImage = Image.new('RGB', (width, height), color="White")
-    pixels = newImage.load()
+        def getPointBetween(t, x1, x2, y1, y2):
+            return (int(round(x1 + t*(x2 - x1))),int(round(y1 + t*(y2-y1))))
 
-    for i in range(width):
-        for j in range(height):
-            if pixelArray[i][j]:
-                pixels[i, j] = (0, 0, 0, 255)
+        for i in range(0,99):
+            t = float(i)/100
+            newPoint = getPointBetween(t, robotCoord[0], spot[0], robotCoord[1], spot[1])
+            pointsBetween.append(newPoint)
 
-    newImage.save(imageName)
+        # Removes duplicats
+        pointsBetween = list(dict.fromkeys(pointsBetween))
 
+        for clearSpot in pointsBetween:
+            try:
+                self.clearArray[clearSpot[0]][clearSpot[1]] = "Clear"
+            except:
+                print("Clear spot out of bounds: " + str(clearSpot))
+
+    def calculateSpot(self, angleToUse, distance):
+        global robot
+        yDelta = math.sin(angleToUse)*distance
+        xDelta = math.cos(angleToUse)*distance
+        mapScaler = 9.5
+        p = [robot[0] + xDelta, robot[1] + yDelta]
+        p[0] += 7.5
+        p[1] -= 7.5
+        p[1] = abs(p[1])
+
+        p[0] = int(round(p[0]*mapScaler))
+        p[1] = int(round(p[1]*mapScaler))
+
+        if p[0] > self.width-1: p[0] = self.width - 1
+        if p[1] > self.height-1: p[1] = self.height - 1
+
+        return p
+
+    def pixelsToImage(self, imageName):
+        newImage = Image.new('RGBA', (self.width, self.height), (0, 0, 0, 0))
+        pixels = newImage.load()
+
+        for i in range(self.width):
+            for j in range(self.height):
+                pixels[i, j] = (0,0,0,0)
+
+        self.makeCompleteMap()
+        self.smoothCompleteMap()
+
+        # Saves clear spots first, then black on top
+        for i in range(self.width):
+            for j in range(self.height):
+                if self.latestCompleteMap[i][j] == "Clear":
+                    pixels[i, j] = (255, 255, 255, 255)
+                if self.latestCompleteMap[i][j] == "Black":
+                    pixels[i, j] = (0, 0, 0, 255)
+
+        newImage.save(imageName)
+
+    def makeCompleteMap(self):
+        tempArray = self.__createBlankMapArray(self.width, self.height)
+        # Saves clear spots first, then black on top
+        for i in range(self.width):
+            for j in range(self.height):
+                if self.clearArray[i][j] == "Clear":
+                    tempArray[i][j] = "Clear"
+                if self.obstaclesArray[i][j] == "Black":
+                    tempArray[i][j] = "Black"
+
+        self.latestCompleteMap = tempArray
+
+    def smoothCompleteMap(self):
+        for i in range(self.width):
+            for j in range(self.height):
+                if self.latestCompleteMap[i][j] == "Black":
+                    try:
+                        if self.latestCompleteMap[i+1][j] == "Clear" and self.latestCompleteMap[i-1][j] == "Clear" and self.latestCompleteMap[i][j+1] == "Clear" and self.latestCompleteMap[i][j-1] == "Clear":
+                            self.latestCompleteMap[i][j] = "Clear"
+                    except:
+                        None
 
 robot = [0,0,0]
 laser_scan = None
 goal = None
-mapArray = createBlankMapArray(150,150)
+mapArray = MapArray(150,150)
 places = {}
+
+
 
 
 def robot_callback(data):
@@ -195,26 +289,29 @@ def obstacle_force():
         # if (cur_angle < 1.5708 and cur_angle > -1.5708):
         angleToUse = cur_angle + robot[2]
         distance = laser_scan.ranges[i]
-        yDelta = math.sin(angleToUse)*distance
-        xDelta = math.cos(angleToUse)*distance
-        mapScaler = 9.5
-        p = [robot[0] + xDelta, robot[1] + yDelta]
-        p[0] += 7.5
-        p[1] -= 7.5
-        p[1] = abs(p[1])
+        p = mapArray.calculateSpot(angleToUse, distance)
+        # yDelta = math.sin(angleToUse)*distance
+        # xDelta = math.cos(angleToUse)*distance
+        # mapScaler = 9.5
+        # p = [robot[0] + xDelta, robot[1] + yDelta]
+        # p[0] += 7.5
+        # p[1] -= 7.5
+        # p[1] = abs(p[1])
 
-        p[0] = int(round(p[0]*mapScaler))
-        p[1] = int(round(p[1]*mapScaler))
+        # p[0] = int(round(p[0]*mapScaler))
+        # p[1] = int(round(p[1]*mapScaler))
 
-        if p[0] > 149: p[0] = 149
-        if p[1] > 149: p[1] = 149
+        # if p[0] > 149: p[0] = 149
+        # if p[1] > 149: p[1] = 149
 
 
-        try:
-            mapArray[p[0]][p[1]] = True
-            places[str(p[0])+","+str(p[1])] = True
-        except:
-            print "Out of bounds: " + str(p)
+        # try:
+        mapArray.markObjects(p)
+        # mapArray = markObjectAndSpace(mapArray, p)
+            # mapArray[p[0]][p[1]] = True
+        places[str(p[0])+","+str(p[1])] = True
+        # except Exception:
+        #     print "Out of bounds: " + str(p)
 
         x = -strength * math.cos(wrap_angle(cur_angle)) # Make negative if not on part D
         y = -strength * math.sin(wrap_angle(cur_angle)) # Make negative if not on part D
@@ -331,10 +428,11 @@ def potential():
         # print ""
         rate.sleep() #sleep until the next time to publish
 
-        if count == 400:
+        if count == 350:
             print "Saving file..."
-            pixelsToImage(mapArray, "/home/patrick/catkin_ws/src/ai_labs/testImage.png")
-            print(places.keys())
+            mapArray.pixelsToImage("/home/patrick/catkin_ws/src/ai_labs/testImage.png")
+            # pixelsToImage(mapArray, "/home/patrick/catkin_ws/src/ai_labs/testImage.png")
+            # print(places.keys())
             break
         
 
